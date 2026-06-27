@@ -75,13 +75,13 @@ else
     echo "WARNING: creating open access point"
 fi
 
-RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).2"
-RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).100"
+RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).10"
+RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).200"
 
 echo "Creating dnsmasq config..."
 cat > /etc/dnsmasq.conf <<EOF
 interface=$INTERFACE
-bind-interfaces
+bind-dynamic
 except-interface=lo
 dhcp-range=$RANGE_START,$RANGE_END,$NETMASK,12h
 dhcp-option=3,$ADDRESS
@@ -97,6 +97,13 @@ echo "$FIXED_IPS" | jq -c '.[]' | while read -r row; do
         echo "dhcp-host=$MAC,$IP" >> /etc/dnsmasq.conf
     fi
 done
+
+echo "Starting dnsmasq..."
+dnsmasq \
+  --keep-in-foreground \
+  --log-facility=- \
+  --interface="$INTERFACE" &
+
 
 echo "Enabling LAN-only forwarding..."
 echo 1 > /proc/sys/net/ipv4/ip_forward
