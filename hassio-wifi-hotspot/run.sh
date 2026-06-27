@@ -90,3 +90,16 @@ dnsmasq --keep-in-foreground &
 
 echo "Starting hostapd..."
 exec hostapd -d /hostapd.conf
+
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+UPSTREAM="end0"
+DOWNSTREAM="$INTERFACE"  # wlan0
+
+# Allow forwarding between hotspot and LAN
+iptables -F
+iptables -t nat -F
+
+iptables -A FORWARD -i "$DOWNSTREAM" -o "$UPSTREAM" -j ACCEPT
+iptables -A FORWARD -i "$UPSTREAM" -o "$DOWNSTREAM" -m state --state RELATED,ESTABLISHED -j ACCEPT
