@@ -1,6 +1,6 @@
 FROM ghcr.io/home-assistant/base:latest
 
-LABEL maintainer="Lucas DRAGO <lucas_drago@hotmail.fr>"
+LABEL maintainer="jcmunozf"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV LANG=C.UTF-8
