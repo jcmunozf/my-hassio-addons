@@ -13,8 +13,8 @@ NETMASK=$(jq -r '.netmask' "$CONFIG_PATH")
 BROADCAST=$(jq -r '.broadcast' "$CONFIG_PATH")
 FIXED_IPS=$(jq -c '.fixed_ips // []' "$CONFIG_PATH")
 
-UPSTREAM="end0"
-ROUTER_IP="192.168.1.1"
+UPSTREAM="end0"           # wired LAN interface inside HAOS
+ROUTER_IP="192.168.1.1"   # your main router on the LAN
 
 required_vars=(INTERFACE SSID CHANNEL ADDRESS NETWORK NETMASK BROADCAST)
 for required_var in "${required_vars[@]}"; do
@@ -104,10 +104,13 @@ echo 1 > /proc/sys/net/ipv4/ip_forward
 iptables -F
 iptables -t nat -F
 
+# Allow hotspot clients to reach 192.168.1.0/24 (LAN including Home Assistant)
 iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -d 192.168.1.0/24 -j ACCEPT
 iptables -A FORWARD -i "$UPSTREAM" -o "$INTERFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
 
+# Block hotspot clients from reaching the router IP (no direct internet)
 iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -d "$ROUTER_IP" -j DROP
+# Block any other traffic from hotspot to upstream (paranoid default)
 iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -j DROP
 
 echo "Starting dnsmasq..."
