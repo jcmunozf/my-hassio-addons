@@ -13,6 +13,9 @@ NETMASK=$(jq -r '.netmask' "$CONFIG_PATH")
 BROADCAST=$(jq -r '.broadcast' "$CONFIG_PATH")
 FIXED_IPS=$(jq -c '.fixed_ips // []' "$CONFIG_PATH")
 
+UPSTREAM="end0"
+ROUTER_IP="192.168.1.1"
+
 required_vars=(INTERFACE SSID CHANNEL ADDRESS NETWORK NETMASK BROADCAST)
 for required_var in "${required_vars[@]}"; do
     if [[ -z "${!required_var}" || "${!required_var}" == "null" ]]; then
@@ -23,8 +26,10 @@ done
 
 term_handler() {
     echo "Stopping..."
-    pkill dnsmasq || true
-    pkill hostapd || true
+    pkill dnsmasq 2>/dev/null || true
+    pkill hostapd 2>/dev/null || true
+    iptables -F || true
+    iptables -t nat -F || true
     ip link set "$INTERFACE" down || true
     ip addr flush dev "$INTERFACE" || true
     exit 0
@@ -38,13 +43,17 @@ if command -v nmcli >/dev/null 2>&1; then
     nmcli dev set "$INTERFACE" managed no || true
 fi
 
+echo "Stopping any existing dnsmasq..."
+pkill dnsmasq 2>/dev/null || true
+
 echo "Configuring interface $INTERFACE..."
 ip link set "$INTERFACE" down || true
 ip addr flush dev "$INTERFACE" || true
-ip addr add 192.168.99.1/24 dev "$INTERFACE"
+ip addr add "${ADDRESS}/24" broadcast "$BROADCAST" dev "$INTERFACE"
 ip link set "$INTERFACE" up
 ip addr show "$INTERFACE"
 
+echo "Creating hostapd config..."
 cat > /hostapd.conf <<EOF
 interface=$INTERFACE
 driver=nl80211
@@ -69,52 +78,42 @@ fi
 RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).2"
 RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).100"
 
-
-echo "Stopping any existing dnsmasq..."
-pkill dnsmasq 2>/dev/null || true
-
-RANGE_START="192.168.99.2"
-RANGE_END="192.168.99.100"
-
+echo "Creating dnsmasq config..."
 cat > /etc/dnsmasq.conf <<EOF
 interface=$INTERFACE
 bind-interfaces
-no-dhcp-interface=end0
-dhcp-range=$RANGE_START,$RANGE_END,255.255.255.0,12h
-dhcp-option=3,192.168.99.1
-dhcp-option=6,192.168.99.1
+except-interface=lo
+dhcp-range=$RANGE_START,$RANGE_END,$NETMASK,12h
+dhcp-option=3,$ADDRESS
+dhcp-option=6,$ADDRESS
 log-queries
 log-dhcp
 EOF
 
-echo "Starting dnsmasq..."
-dnsmasq --keep-in-foreground --log-facility=- &
-
-echo "Starting dnsmasq..."
-dnsmasq --no-daemon &
-
 echo "$FIXED_IPS" | jq -c '.[]' | while read -r row; do
-    NAME=$(echo "$row" | jq -r '.name')
     MAC=$(echo "$row" | jq -r '.mac_address')
     IP=$(echo "$row" | jq -r '.ip')
-    echo "dhcp-host=$MAC,$IP" >> /etc/dnsmasq.conf
+    if [[ -n "$MAC" && "$MAC" != "null" && -n "$IP" && "$IP" != "null" ]]; then
+        echo "dhcp-host=$MAC,$IP" >> /etc/dnsmasq.conf
+    fi
 done
 
-echo "Starting dnsmasq..."
-dnsmasq --keep-in-foreground &
-
-echo "Starting hostapd..."
-exec hostapd -d /hostapd.conf
-
-
+echo "Enabling LAN-only forwarding..."
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-UPSTREAM="end0"
-DOWNSTREAM="$INTERFACE"  # wlan0
-
-# Allow forwarding between hotspot and LAN
 iptables -F
 iptables -t nat -F
 
-iptables -A FORWARD -i "$DOWNSTREAM" -o "$UPSTREAM" -j ACCEPT
-iptables -A FORWARD -i "$UPSTREAM" -o "$DOWNSTREAM" -m state --state RELATED,ESTABLISHED -j ACCEPT
+iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -d 192.168.1.0/24 -j ACCEPT
+iptables -A FORWARD -i "$UPSTREAM" -o "$INTERFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -d "$ROUTER_IP" -j DROP
+iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -j DROP
+
+echo "Starting dnsmasq..."
+dnsmasq --keep-in-foreground --log-facility=- &
+
+sleep 2
+
+echo "Starting hostapd..."
+exec hostapd -d /hostapd.conf
