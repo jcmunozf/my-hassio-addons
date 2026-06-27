@@ -111,7 +111,7 @@ iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -d "$ROUTER_IP" -j DROP
 iptables -A FORWARD -i "$INTERFACE" -o "$UPSTREAM" -j DROP
 
 echo "Starting dnsmasq..."
-dnsmasq --keep-in-foreground --log-facility=- &
+dnsmasq --keep-in-foreground --log-facility=- --interface="$INTERFACE" --bind-interfaces &
 
 sleep 2
 
