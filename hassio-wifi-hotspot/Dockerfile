@@ -13,7 +13,8 @@ RUN apk add --no-cache \
     dnsmasq \
     networkmanager \
     net-tools \
-    sudo
+    sudo \
+    iproute2
 
 COPY hostapd.conf /
 COPY run.sh /
