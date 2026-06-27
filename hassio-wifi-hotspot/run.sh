@@ -38,11 +38,12 @@ if command -v nmcli >/dev/null 2>&1; then
     nmcli dev set "$INTERFACE" managed no || true
 fi
 
-echo "Configuring interface"
+echo "Configuring interface $INTERFACE..."
 ip link set "$INTERFACE" down || true
 ip addr flush dev "$INTERFACE" || true
-ip addr add "${ADDRESS}/24" broadcast "$BROADCAST" dev "$INTERFACE"
+ip addr add 192.168.99.1/24 dev "$INTERFACE"
 ip link set "$INTERFACE" up
+ip addr show "$INTERFACE"
 
 cat > /hostapd.conf <<EOF
 interface=$INTERFACE
@@ -68,15 +69,21 @@ fi
 RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).2"
 RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).100"
 
+RANGE_START="192.168.99.2"
+RANGE_END="192.168.99.100"
+
 cat > /etc/dnsmasq.conf <<EOF
 interface=$INTERFACE
 bind-interfaces
-domain-needed
-bogus-priv
 dhcp-range=$RANGE_START,$RANGE_END,255.255.255.0,12h
-dhcp-option=3,$ADDRESS
-dhcp-option=6,$ADDRESS
+dhcp-option=3,192.168.99.1
+dhcp-option=6,192.168.99.1
+log-queries
+log-dhcp
 EOF
+
+echo "Starting dnsmasq..."
+dnsmasq --no-daemon &
 
 echo "$FIXED_IPS" | jq -c '.[]' | while read -r row; do
     NAME=$(echo "$row" | jq -r '.name')
