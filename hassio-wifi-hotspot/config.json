@@ -1,12 +1,13 @@
 {
   "name": "Hassio wifi hotspot",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "slug": "hassio-wifi-hotspot",
   "description": "Connect directly your wifi sensors / cams / lights / outlets to hassio for a perfect devices isolation",
   "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
   "url": "https://github.com/jcmunozf/my-hassio-addons",
   "startup": "system",
   "boot": "auto",
+  "init": false,
   "host_network": true,
   "apparmor": false,
   "host_dbus": true,
@@ -27,18 +28,20 @@
   ],
   "options": {
     "interface": "wlan0",
-    "ssid": "HA-hotspot",
+    "ssid": "HA-Hotspot",
     "wpa_passphrase": "",
-    "channel": "6",
+    "channel": 6,
     "network": "192.168.99.0",
     "address": "192.168.99.1",
     "netmask": "255.255.255.0",
     "broadcast": "192.168.99.255",
-    "fixed_ips": [{
-      "name": "outlet1",
-      "mac_address": "00:00:00:00:00",
-      "ip": "192.168.99.10"
-    }]
+    "fixed_ips": [
+      {
+        "name": "outlet1",
+        "mac_address": "00:00:00:00:00",
+        "ip": "192.168.99.10"
+      }
+    ]
   },
   "schema": {
     "interface": "str",
@@ -49,10 +52,12 @@
     "address": "str",
     "netmask": "str",
     "broadcast": "str",
-    "fixed_ips": [{
-      "name": "str",
-      "mac_address": "str",
-      "ip": "str"
-    }]
+    "fixed_ips": [
+      {
+        "name": "str",
+        "mac_address": "str",
+        "ip": "str"
+      }
+    ]
   }
-} 
+}
