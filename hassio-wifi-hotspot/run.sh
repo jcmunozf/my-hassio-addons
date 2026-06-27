@@ -69,18 +69,26 @@ fi
 RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).2"
 RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).100"
 
+
+echo "Stopping any existing dnsmasq..."
+pkill dnsmasq 2>/dev/null || true
+
 RANGE_START="192.168.99.2"
 RANGE_END="192.168.99.100"
 
 cat > /etc/dnsmasq.conf <<EOF
 interface=$INTERFACE
 bind-interfaces
+no-dhcp-interface=end0
 dhcp-range=$RANGE_START,$RANGE_END,255.255.255.0,12h
 dhcp-option=3,192.168.99.1
 dhcp-option=6,192.168.99.1
 log-queries
 log-dhcp
 EOF
+
+echo "Starting dnsmasq..."
+dnsmasq --keep-in-foreground --log-facility=- &
 
 echo "Starting dnsmasq..."
 dnsmasq --no-daemon &
