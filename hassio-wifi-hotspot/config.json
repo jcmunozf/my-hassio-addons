@@ -27,7 +27,7 @@
   ],
   "options": {
     "interface": "wlan0",
-    "ssid": "",
+    "ssid": "HA-hotspot",
     "wpa_passphrase": "",
     "channel": "6",
     "network": "192.168.99.0",
