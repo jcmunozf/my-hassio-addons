@@ -1,113 +1,92 @@
 #!/bin/bash
+set -euo pipefail
 
 CONFIG_PATH=/data/options.json
 
-INTERFACE=$(jq --raw-output ".interface" $CONFIG_PATH)
-SSID=$(jq --raw-output ".ssid" $CONFIG_PATH)
-WPA_PASSPHRASE=$(jq --raw-output ".wpa_passphrase" $CONFIG_PATH)
-CHANNEL=$(jq --raw-output ".channel" $CONFIG_PATH)
-ADDRESS=$(jq --raw-output ".address" $CONFIG_PATH)
-NETWORK=$(jq --raw-output ".network" $CONFIG_PATH)
-NETMASK=$(jq --raw-output ".netmask" $CONFIG_PATH)
-BROADCAST=$(jq --raw-output ".broadcast" $CONFIG_PATH)
-FIXED_IPS=$(jq --raw-output ".fixed_ips" $CONFIG_PATH)
+INTERFACE=$(jq -r '.interface' "$CONFIG_PATH")
+SSID=$(jq -r '.ssid' "$CONFIG_PATH")
+WPA_PASSPHRASE=$(jq -r '.wpa_passphrase' "$CONFIG_PATH")
+CHANNEL=$(jq -r '.channel' "$CONFIG_PATH")
+ADDRESS=$(jq -r '.address' "$CONFIG_PATH")
+NETWORK=$(jq -r '.network' "$CONFIG_PATH")
+NETMASK=$(jq -r '.netmask' "$CONFIG_PATH")
+BROADCAST=$(jq -r '.broadcast' "$CONFIG_PATH")
+FIXED_IPS=$(jq -c '.fixed_ips // []' "$CONFIG_PATH")
 
-# Enforces required env variables
-required_vars=(SSID CHANNEL ADDRESS NETMASK BROADCAST)
+required_vars=(INTERFACE SSID CHANNEL ADDRESS NETWORK NETMASK BROADCAST)
 for required_var in "${required_vars[@]}"; do
-    if [[ -z ${!required_var} ]]; then
-        error=1
-        echo >&2 "Error: $required_var env variable not set."
+    if [[ -z "${!required_var}" || "${!required_var}" == "null" ]]; then
+        echo >&2 "Error: $required_var is not set."
         exit 1
     fi
 done
 
-
-# SIGTERM-handler this funciton will be executed when the container receives the SIGTERM signal (when stopping)
-term_handler(){
-	echo "Stopping..."
-	eval "ifdown $INTERFACE"
-	eval "ip link set $INTERFACE down"
-	eval "ip addr flush dev $INTERFACE"
-	exit 0
+term_handler() {
+    echo "Stopping..."
+    pkill dnsmasq || true
+    pkill hostapd || true
+    ip link set "$INTERFACE" down || true
+    ip addr flush dev "$INTERFACE" || true
+    exit 0
 }
+trap 'term_handler' SIGTERM SIGINT
 
-# Setup signal handlers
-trap 'term_handler' SIGTERM
+echo "Starting hotspot on $INTERFACE"
 
-echo "Starting..."
-
-echo "Set nmcli managed no"
-eval "nmcli dev set $INTERFACE managed no"
-
-
-
-# Setup hostapd.conf
-echo "Setup hostapd ..."
-echo "interface=$INTERFACE"$'\n' >> /hostapd.conf
-echo "channel=$CHANNEL"$'\n' >> /hostapd.conf
-echo "ssid=$SSID"$'\n' >> /hostapd.conf
-if [ "${WPA_PASSPHRASE}" == "" ] ; then
-	echo "WARNING: no passphrase configured so creating an open access point"
-else
-	echo "auth_algs=1"$'\n' >> /hostapd.conf
-	echo "wpa=2"$'\n' >> /hostapd.conf
-	echo "wpa_key_mgmt=WPA-PSK"$'\n' >> /hostapd.conf
-	echo "rsn_pairwise=CCMP"$'\n' >> /hostapd.conf
-	echo "wpa_passphrase=$WPA_PASSPHRASE"$'\n' >> /hostapd.conf
+if command -v nmcli >/dev/null 2>&1; then
+    echo "Setting NetworkManager unmanaged for $INTERFACE"
+    nmcli dev set "$INTERFACE" managed no || true
 fi
 
-# Setup interface
-echo "Setup interface ..."
+echo "Configuring interface"
+ip link set "$INTERFACE" down || true
+ip addr flush dev "$INTERFACE" || true
+ip addr add "${ADDRESS}/24" broadcast "$BROADCAST" dev "$INTERFACE"
+ip link set "$INTERFACE" up
 
-#ip link set $INTERFACE down
-#ip addr flush dev $INTERFACE
-#ip addr add ${IP_ADDRESS}/24 dev $INTERFACE
-#ip link set $INTERFACE up
+cat > /hostapd.conf <<EOF
+interface=$INTERFACE
+driver=nl80211
+ssid=$SSID
+hw_mode=g
+channel=$CHANNEL
+wmm_enabled=1
+EOF
 
-echo "address $ADDRESS"$'\n' >> /etc/network/interfaces
-echo "netmask $NETMASK"$'\n' >> /etc/network/interfaces
-echo "broadcast $BROADCAST"$'\n' >> /etc/network/interfaces
+if [[ -n "$WPA_PASSPHRASE" && "$WPA_PASSPHRASE" != "null" ]]; then
+cat >> /hostapd.conf <<EOF
+auth_algs=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=$WPA_PASSPHRASE
+EOF
+else
+    echo "WARNING: creating open access point"
+fi
 
+RANGE_START="$(echo "$NETWORK" | cut -d . -f 1-3).2"
+RANGE_END="$(echo "$NETWORK" | cut -d . -f 1-3).100"
 
-# Setup interface
-echo "Setup dhcp ..."
+cat > /etc/dnsmasq.conf <<EOF
+interface=$INTERFACE
+bind-interfaces
+domain-needed
+bogus-priv
+dhcp-range=$RANGE_START,$RANGE_END,255.255.255.0,12h
+dhcp-option=3,$ADDRESS
+dhcp-option=6,$ADDRESS
+EOF
 
-DHCPD_FIXED_IPS_FORMAT="$(echo 'group {\n') $(for row in $(echo "${FIXED_IPS}" | jq -r '.[] | @base64'); do
-    _jq() {
-     echo ${row} | base64 -d | jq -r ${1}
-    }
+echo "$FIXED_IPS" | jq -c '.[]' | while read -r row; do
+    NAME=$(echo "$row" | jq -r '.name')
+    MAC=$(echo "$row" | jq -r '.mac_address')
+    IP=$(echo "$row" | jq -r '.ip')
+    echo "dhcp-host=$MAC,$IP" >> /etc/dnsmasq.conf
+done
 
-   echo "host $(_jq '.name')           { hardware ethernet $(_jq '.mac_address'); fixed-address $(_jq '.ip');}\n"
-done) $(echo '}')"
+echo "Starting dnsmasq..."
+dnsmasq --keep-in-foreground &
 
-cat > /etc/dhcp/dhcpd.conf <<ENDFILE
-option domain-name-servers $ADDRESS;
-
-default-lease-time 600;
-max-lease-time 7200;
-
-authoritative;
-
-log-facility local7;
-
-subnet $NETWORK netmask $NETMASK {
-     #option domain-name "wifi.localhost";
-     option routers $ADDRESS;
-     option subnet-mask $NETMASK;
-     option broadcast-address $BROADCAST;
-     option domain-name-servers $ADDRESS;
-     range dynamic-bootp $(echo $NETWORK | cut -d . -f 1-3).2 $(echo $NETWORK |  cut -d . -f 1-3).100;
-     $(echo -e $DHCPD_FIXED_IPS_FORMAT)
-}
-ENDFILE
-
-eval "ifdown $INTERFACE"
-eval "ifup $INTERFACE"
-
-echo "Starting dhcpd daemon ..."
-touch /var/lib/dhcp/dhcpd.leases
-eval "dhcpd -d -f -pf /var/run/dhcp/dhcpd.pid -cf /etc/dhcp/dhcpd.conf $INTERFACE &"
-
-echo "Starting HostAP daemon ..."
-hostapd -d /hostapd.conf & wait ${!}
+echo "Starting hostapd..."
+exec hostapd -d /hostapd.conf
