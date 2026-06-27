@@ -4,7 +4,7 @@
   "slug": "hassio-wifi-hotspot",
   "description": "Connect directly your wifi sensors / cams / lights / outlets to hassio for a perfect devices isolation",
   "arch": ["armhf", "armv7", "aarch64", "amd64", "i386"],
-  "url": "https://github.com/ldrago63/my-hassio-addons",
+  "url": "https://github.com/jcmunozf/my-hassio-addons",
   "startup": "system",
   "boot": "auto",
   "host_network": true,
